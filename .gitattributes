@@ -1,0 +1,22 @@
+# Shell scripts are pushed to the phone and executed by Android's mksh.
+# CRLF line endings break them with confusing errors like
+#   sh: /data/local/tmp/x.sh: not found
+# or
+#   : not found
+# Keep them LF no matter what core.autocrlf is set to on Windows.
+*.sh       text eol=lf
+gradlew    text eol=lf
+
+# NOTE: gradlew.bat is intentionally NOT listed here.
+# Upstream committed it with CRLF already, and adding
+#   *.bat text eol=crlf
+# would make git normalise it to LF in the index while the file on disk
+# stays CRLF, producing a permanent phantom "modified" entry. It already
+# works on Windows as-is.
+
+# Binary - do not attempt text diff or EOL conversion
+*.apk      binary
+*.jks      binary
+*.png      binary
+*.jar      binary
+*.img      binary

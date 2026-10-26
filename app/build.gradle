@@ -11,8 +11,8 @@ android {
         applicationId "mingww64.phonestick"
         minSdk 24
         targetSdk 34
-        versionCode 12
-        versionName "2.3.0"
+        versionCode 19
+        versionName "2.3.7"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,6 +37,11 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // pstrim 是可执行 elf，压缩后无法直接 chmod +x 运行
+    androidResources {
+        noCompress 'pstrim'
     }
 
     kotlinOptions {

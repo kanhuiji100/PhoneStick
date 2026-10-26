@@ -1,40 +1,48 @@
 <resources>
     <string name="app_name">PhoneStick</string>
 
-    <string name="licenses">Licenses</string>
-    <string name="licenses_upstream">Upstream source</string>
+    <string name="licenses">开源许可</string>
+    <string name="licenses_upstream">上游源码</string>
 
-    <string name="file_picker_nofile">No image selected</string>
+    <string name="file_picker_nofile">未选择镜像</string>
 
     <!-- MainActivity -->
-    <string name="status_title">USB Mass Storage Status</string>
-    <string name="status_mounted">MOUNTED</string>
-    <string name="status_unmounted">UNMOUNTED</string>
-    <string name="status_lun_path">LUN: %1$s</string>
-    <string name="host_source_file">Selected Image</string>
-    <string name="host_ro">Read-only mode</string>
-    <string name="host_ro_summary">Prevent host PC from modifying the disk image</string>
-    <string name="host_cdrom">CD-ROM emulation</string>
-    <string name="host_cdrom_summary">Emulate a virtual CD-ROM drive</string>
-    <string name="host_serve">Mount USB Drive</string>
-    <string name="host_disable">Unmount USB Drive</string>
-    <string name="btn_select_image">Choose Image</string>
-    <string name="btn_create_image">Create Blank Disk Image</string>
-    <string name="host_help">PhoneStick emulates a USB mass storage drive or virtual CD-ROM. Ensure root permission is granted and a compatible kernel is available.</string>
+    <string name="status_title">USB 大容量存储状态</string>
+    <string name="status_mounted">已挂载</string>
+    <string name="status_unmounted">未挂载</string>
+    <string name="status_lun_path">LUN：%1$s</string>
+    <string name="host_source_file">当前镜像</string>
+    <string name="host_ro">只读模式</string>
+    <string name="host_ro_summary">阻止电脑修改磁盘镜像</string>
+    <string name="host_cdrom">光驱模拟</string>
+    <string name="host_cdrom_summary">模拟成虚拟 CD-ROM 光驱</string>
+    <string name="host_serve">挂载 U 盘</string>
+    <string name="host_disable">卸载 U 盘</string>
+    <string name="btn_select_image">选择镜像</string>
+    <string name="btn_create_image">创建空白磁盘镜像</string>
+    <string name="host_help">PhoneStick 可将手机模拟成 USB 大容量存储设备或虚拟光驱。请确保已授予 Root 权限，且设备内核支持相应功能。</string>
 
     <!-- ImageChooserActivity & Dialogs -->
-    <string name="title_activity_image_chooser">Select or Create Disk Image</string>
+    <string name="title_activity_image_chooser">选择或创建磁盘镜像</string>
     <string name="image_chooser_filesize_mib">%1$.1f MiB</string>
-    <string name="image_chooser_add">Import Image</string>
-    <string name="create_image_dialog_title">Create Blank Disk Image</string>
-    <string name="create_image_name_hint">Image Name (e.g. boot.img)</string>
-    <string name="create_image_size_hint">Size in MB (e.g. 512, 1024, 4096)</string>
-    <string name="create_image_confirm">Create Image</string>
-    <string name="cancel">Cancel</string>
+    <string name="image_chooser_add">导入镜像</string>
+    <string name="create_image_dialog_title">创建空白磁盘镜像</string>
+    <string name="create_image_name_hint">镜像名称（例如 boot.img）</string>
+    <string name="create_image_size_hint">容量（MB，例如 512、1024、4096）</string>
+    <string name="create_image_confirm">创建镜像</string>
+    <string name="cancel">取消</string>
 
     <!-- Toast messages -->
-    <string name="host_success">The device should now show up on your PC</string>
-    <string name="host_disable_success">The device should now disappear from your PC</string>
-    <string name="host_noroot">Couldn\'t get root access</string>
-    <string name="file_picker_denied">Please grant storage permission to select or save files</string>
+    <string name="host_success">现在可以在电脑上看到该设备</string>
+    <string name="host_disable_success">该设备已从电脑上消失</string>
+    <string name="host_noroot">无法获取 Root 权限</string>
+    <string name="file_picker_denied">请授予存储权限以选择或保存文件</string>
+
+    <!-- 稀疏镜像空间回收 -->
+    <string name="image_reclaim_space">释放未使用空间</string>
+    <string name="image_reclaim_running">正在整理镜像…</string>
+    <string name="image_reclaim_unmount_first">请先卸载 U 盘再整理镜像</string>
+    <string name="image_reclaim_none">该镜像没有可释放的空间</string>
+    <string name="image_reclaim_done">已释放 %1$s，现占用 %2$s</string>
+    <string name="image_reclaim_failed">整理失败：%1$s</string>
 </resources>

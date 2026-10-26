@@ -74,7 +74,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="LUN: None"
+                        android:text="LUN：无"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
 
                 </LinearLayout>
@@ -131,7 +131,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
-                        android:text="Select Disk Image"
+                        android:text="选择磁盘镜像"
                         app:icon="@drawable/ic_sd_storage_vector" />
 
                 </LinearLayout>
@@ -156,7 +156,7 @@
                         android:id="@+id/switchReadOnly"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:checked="true"
+                        android:checked="false"
                         android:text="@string/host_ro" />
 
                     <TextView

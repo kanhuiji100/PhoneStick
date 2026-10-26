@@ -46,6 +46,12 @@ class ImageChooserActivity : AppCompatActivity() {
     private var isSpeedDialOpen = false
     private var currentlySelectedPath: String = ""
 
+    /** path -> size(bytes)，来自 root shell 的 stat */
+    private val fileSizes = mutableMapOf<String, Long>()
+
+    /** path -> 实际占用(bytes)，稀疏镜像会小于 size */
+    private val fileUsedSizes = mutableMapOf<String, Long>()
+
     private val importFileLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -217,6 +223,8 @@ class ImageChooserActivity : AppCompatActivity() {
         adapter = ImageFilesAdapter(
             files = imageFiles,
             selectedPath = currentlySelectedPath,
+            sizeProvider = { path -> fileSizes[path] ?: 0L },
+            usedProvider = { path -> fileUsedSizes[path] ?: 0L },
             onFileSelected = { file ->
                 selectAndReturnFile(file.absolutePath)
             },
@@ -231,7 +239,8 @@ class ImageChooserActivity : AppCompatActivity() {
                     currentlySelectedPath = newFile.absolutePath
                 }
                 loadImages()
-            }
+            },
+            onFileCompact = { file -> reclaimSpace(file) }
         )
         adapter.onFileLongClick = { file ->
             enterFormatSelectionMode(initialSelectedFile = file)
@@ -251,8 +260,20 @@ class ImageChooserActivity : AppCompatActivity() {
             }
             
             removeExternalImagePath(file.absolutePath)
-            if (file.exists()) {
-                file.delete()
+            // 用 shell 删除：镜像属主可能是 root/media_rw，app 的 File.delete() 会失败。
+            // 优先走 /sdcard（FUSE）路径：MediaProvider 会同步删掉自己的记录，
+            // 否则文件管理器里会残留一条指向已删除文件的「幽灵」条目。
+            val raw = ImageStore.toRawPath(file.absolutePath)
+            val user = ImageStore.toUserPath(raw)
+            val eRaw = raw.replace("'", "'\\''")
+            val eUser = user.replace("'", "'\\''")
+            if (user.startsWith("/sdcard/")) {
+                com.topjohnwu.superuser.Shell.cmd(
+                    "rm -f '$eUser' 2>/dev/null",
+                    "rm -f '$eRaw' 2>/dev/null"
+                ).exec()
+            } else {
+                com.topjohnwu.superuser.Shell.cmd("rm -f '$eRaw'").exec()
             }
 
             withContext(Dispatchers.Main) {
@@ -261,41 +282,105 @@ class ImageChooserActivity : AppCompatActivity() {
                     currentlySelectedPath = ""
                 }
                 loadImages()
-                val msg = if (isMountedImage) "Unmounted and removed ${file.name}" else "Removed ${file.name}"
+                val msg = if (isMountedImage) "已卸载并删除 ${file.name}" else "已删除 ${file.name}"
                 Snackbar.make(binding.root, msg, Snackbar.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+
+    /**
+     * 释放稀疏镜像里已删除文件占用的空间（打洞，不重写数据）。
+     *
+     * 前置条件：镜像不能正被 LUN 占用，否则打洞会把主机正在读写的块挖掉。
+     */
+    private fun reclaimSpace(file: File) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val status = UsbGadgetController.getMountStatus()
+            val raw = ImageStore.toRawPath(file.absolutePath)
+            val mounted = status.isMounted && (
+                ImageStore.toRawPath(status.currentFile) == raw ||
+                    ImageStore.toRawPath(currentlySelectedPath) == raw
+                )
+
+            withContext(Dispatchers.Main) {
+                if (mounted) {
+                    MaterialAlertDialogBuilder(this@ImageChooserActivity)
+                        .setTitle(getString(R.string.image_reclaim_space))
+                        .setMessage(getString(R.string.image_reclaim_unmount_first))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                    return@withContext
+                }
+                if (!ImageCompactor.isSupported()) {
+                    MaterialAlertDialogBuilder(this@ImageChooserActivity)
+                        .setTitle(getString(R.string.image_reclaim_space))
+                        .setMessage(getString(R.string.image_reclaim_failed, "当前设备架构不支持"))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                    return@withContext
+                }
+
+                val dialog = MaterialAlertDialogBuilder(this@ImageChooserActivity)
+                    .setTitle(getString(R.string.image_reclaim_space))
+                    .setMessage(getString(R.string.image_reclaim_running))
+                    .setCancelable(false)
+                    .create()
+                dialog.show()
+
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val result = ImageCompactor.trim(this@ImageChooserActivity, file.absolutePath)
+                    withContext(Dispatchers.Main) {
+                        dialog.dismiss()
+                        if (result.success) {
+                            loadImages()
+                            val msg = if (result.freedBytes <= 0) {
+                                getString(R.string.image_reclaim_none)
+                            } else {
+                                getString(
+                                    R.string.image_reclaim_done,
+                                    ImageStore.formatSize(result.freedBytes),
+                                    ImageStore.formatSize(result.usedBytes)
+                                )
+                            }
+                            Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
+                        } else {
+                            MaterialAlertDialogBuilder(this@ImageChooserActivity)
+                                .setTitle(getString(R.string.image_reclaim_space))
+                                .setMessage(getString(R.string.image_reclaim_failed, result.message))
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show()
+                        }
+                    }
+                }
             }
         }
     }
 
     private fun loadImages() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val internalFiles = filesDir.listFiles { file ->
-                file.isFile && isValidImageExtension(file.extension)
-            }?.toList() ?: emptyList()
+            // 统一从 /sdcard/PhoneStick 目录枚举镜像。
+            // 不用 filesDir.listFiles()：那个位置是 app_data_file，
+            // 内核 gadget 线程写不进去，会导致主机端 fdisk 报 I/O error。
+            ImageStore.ensureDir()
+            val externalFiles = ImageStore.listImages()
 
-            val externalPaths = getExternalImagePaths()
-            val validExternalPaths = mutableListOf<String>()
+            // 自愈：历史镜像可能因为「root 重建同名文件」而让 MediaStore
+            // 留着旧大小（文件管理器显示 2GB 的元凶）。列表加载时对一遍，
+            // 不一致的按真实大小重设一次。
+            ImageStore.repairFuseMetadata(externalFiles.map { it.absolutePath })
 
-            if (externalPaths.isNotEmpty()) {
-                val script = externalPaths.map { path ->
-                    val escaped = path.replace("'", "'\\''")
-                    "if [ -f '$escaped' ] && [ -s '$escaped' ]; then echo \"VALID:$path\"; fi"
-                }.toTypedArray()
+            val sizeMap = ImageStore.queryAll(externalFiles.map { it.absolutePath })
 
-                val res = com.topjohnwu.superuser.Shell.cmd(*script).exec()
-                if (res.isSuccess) {
-                    for (line in res.out) {
-                        if (line.startsWith("VALID:")) {
-                            validExternalPaths.add(line.substring(6))
-                        }
-                    }
-                }
-            }
-
-            val externalFiles = validExternalPaths.map { File(it) }.filter { isValidImageExtension(it.extension) }
-            val combined = (internalFiles + externalFiles).distinctBy { it.absolutePath }
+            val combined = externalFiles.distinctBy { it.absolutePath }
 
             withContext(Dispatchers.Main) {
+                fileSizes.clear()
+                fileUsedSizes.clear()
+                for ((k, v) in sizeMap) {
+                    fileSizes[k] = v.size
+                    fileUsedSizes[k] = v.usedBytes
+                }
                 imageFiles.clear()
                 imageFiles.addAll(combined)
                 if (::adapter.isInitialized) {
@@ -308,53 +393,148 @@ class ImageChooserActivity : AppCompatActivity() {
     private fun handleImportedUri(uri: Uri) {
         setLoading(true)
         lifecycleScope.launch(Dispatchers.IO) {
+            // 解析出用户选的源文件路径
             val resolvedPath = UriPathResolver.getRealPathFromUri(this@ImageChooserActivity, uri)
 
-            var exists = false
-            var isFile = false
-            var length = 0L
-
-            if (resolvedPath.isNotEmpty()) {
-                val escapedPath = resolvedPath.replace("'", "'\\''")
-                val res = com.topjohnwu.superuser.Shell.cmd(
-                    "if [ -e '$escapedPath' ]; then echo EXISTS; fi",
-                    "if [ -f '$escapedPath' ]; then echo IS_FILE; fi",
-                    "stat -c %s '$escapedPath' 2>/dev/null || echo 0"
-                ).exec()
-
-                val out = res.out
-                exists = out.contains("EXISTS")
-                isFile = out.contains("IS_FILE")
-                length = out.lastOrNull()?.toLongOrNull() ?: 0L
-                android.util.Log.d("ImageChooserActivity", "Shell check for $escapedPath: EXISTS=$exists, IS_FILE=$isFile, length=$length, out=${out}, err=${res.err}")
+            // 关键改动：不再对源路径做"能不能读"的校验就放弃，
+            // 而是统一复制到 /sdcard/PhoneStick/（media_rw_data_file）。
+            //
+            // 原实现直接拿 resolvedPath 去 stat/校验，遇到用户从"文档"或
+            // 其他 SAF provider 选的、权限受限的文件时会得到 size=0，
+            // 于是提示 "0 bytes empty" 并拒绝导入；即使通过了，
+            // 文件也可能留在 app_data_file 位置，导致内核写不进去。
+            val imported = if (resolvedPath.isNotEmpty() && !resolvedPath.startsWith("content://")) {
+                importFromPath(resolvedPath)
+            } else {
+                importFromUri(uri)
             }
-
-            val ext = File(resolvedPath).extension
-            val isValidExt = isValidImageExtension(ext)
-            val isValid = exists && isFile && length > 0 && isValidExt
 
             withContext(Dispatchers.Main) {
                 setLoading(false)
-                if (isValid && resolvedPath.isNotEmpty()) {
-                    addExternalImagePath(resolvedPath)
-                    loadImages()
-                    selectAndReturnFile(resolvedPath)
-                } else {
-                    val errorMsg = when {
-                        !exists -> "Import failed: File does not exist"
-                        !isFile -> "Import failed: Selected path is not a regular file"
-                        length <= 0 -> "Import failed: Selected file is 0 bytes empty"
-                        !isValidExt -> "Import failed: File extension '.$ext' is not a supported disk image format (.img, .iso, .bin, .raw, .vhd, .qcow2)"
-                        else -> "Import failed: Invalid disk image file"
+                if (imported != null) {
+                    val info = ImageStore.query(imported)
+                    if (info.valid) {
+                        // 选中并直接返回主界面，主界面才能更新状态、启用 Mount 按钮
+                        Snackbar.make(
+                            binding.root,
+                            "已导入 ${File(imported).name}（${ImageStore.formatSize(info.size)}）",
+                            Snackbar.LENGTH_SHORT
+                        ).show()
+                        currentlySelectedPath = imported
+                        selectAndReturnFile(imported)
+                    } else {
+                        showImportError("导入的文件为空或无法读取")
                     }
-                    MaterialAlertDialogBuilder(this@ImageChooserActivity)
-                        .setTitle("Invalid Image File")
-                        .setMessage(errorMsg)
-                        .setPositiveButton(android.R.string.ok, null)
-                        .show()
+                } else {
+                    showImportError("导入所选文件失败")
                 }
             }
         }
+    }
+
+    private fun showImportError(msg: String) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("导入失败")
+            .setMessage(msg)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    /**
+     * 把普通文件路径导入到共享目录。
+     * 若已经在 /sdcard/PhoneStick 下则直接返回；否则复制过去。
+     * 返回可用的镜像路径，失败返回 null。
+     */
+    private fun importFromPath(srcPath: String): String? {
+        val rawSrc = ImageStore.toRawPath(srcPath)
+        val name = File(srcPath).name.let {
+            if (isValidImageExtension(File(it).extension)) it else "$it.img"
+        }
+        val dst = "${ImageStore.RAW_DIR}/$name"
+
+        val eSrc = srcPath.replace("'", "'\\''")
+        val eRaw = rawSrc.replace("'", "'\\''")
+        val eDst = dst.replace("'", "'\\''")
+
+        // 已在目标目录就直接用
+        if (rawSrc == dst && ImageStore.query(dst).valid) {
+            ImageStore.makeReadable(dst)
+            return ImageStore.toUserPath(dst)
+        }
+
+        val res = com.topjohnwu.superuser.Shell.cmd(
+            "mkdir -p '${ImageStore.RAW_DIR}'",
+            "SRC='$eSrc'",
+            "RAW='$eRaw'",
+            "DST='$eDst'",
+            // 源文件存在且非空才复制
+            "if [ ! -s \"\$RAW\" ]; then echo SRC_EMPTY; exit 0; fi",
+            // 目标已存在且大小一致，视为已导入
+            "SSZ=\$(stat -c %s \"\$RAW\" 2>/dev/null || echo 0)",
+            "DSZ=\$(stat -c %s \"\$DST\" 2>/dev/null || echo 0)",
+            "if [ \"\$SSZ\" = \"\$DSZ\" ] && [ \"\$DSZ\" != \"0\" ]; then echo DUP_OK; exit 0; fi",
+            "cp -f \"\$RAW\" \"\$DST\" 2>&1 || cp -f \"\$SRC\" \"\$DST\" 2>&1",
+            "sync",
+            "chown 1023:1023 \"\$DST\" 2>/dev/null || true",
+            "chmod 0664 \"\$DST\" 2>/dev/null || true",
+            "OSZ=\$(stat -c %s \"\$DST\" 2>/dev/null || echo 0)",
+            "if [ \"\$OSZ\" = \"\$SSZ\" ]; then echo COPY_OK; else echo COPY_FAIL; fi"
+        ).exec()
+
+        val out = (res.out + res.err).joinToString("\n")
+        android.util.Log.d("ImageChooserActivity", "importFromPath out=$out")
+
+        return when {
+            out.contains("COPY_OK") || out.contains("DUP_OK") -> {
+                // 同名旧镜像可能残留 MediaStore 记录，导入后同步一次大小
+                ImageStore.syncFuseMetadata(dst)
+                ImageStore.toUserPath(dst)
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * 从 SAF uri 直接流式复制到共享目录。
+     * 用于源路径无法通过 root 拿到实体文件的情况。
+     */
+    private fun importFromUri(uri: Uri): String? {
+        var name = Uri.decode(uri.toString()).substringAfterLast('/').substringAfterLast("%3F").substringAfterLast('?')
+        if (name.contains(':')) name = name.substringAfterLast(':')
+        if (name.isBlank()) name = "imported_${System.currentTimeMillis()}.img"
+        if (!isValidImageExtension(File(name).extension)) name = "$name.img"
+
+        val dstPath = "${ImageStore.RAW_DIR}/$name"
+        val tmpPath = "$dstPath.tmp"
+
+        try {
+            val tmpFile = File(tmpPath)
+            contentResolver.openInputStream(uri)?.use { input ->
+                tmpFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+        } catch (e: Exception) {
+            android.util.Log.e("ImageChooserActivity", "copy from uri failed: ${e.message}", e)
+            com.topjohnwu.superuser.Shell.cmd("rm -f '${tmpPath.replace("'", "'\\''")}'").exec()
+            return null
+        }
+
+        val eTmp = tmpPath.replace("'", "'\\''")
+        val eDst = dstPath.replace("'", "'\\''")
+        val res = com.topjohnwu.superuser.Shell.cmd(
+            "TSZ=\$(stat -c %s '$eTmp' 2>/dev/null || echo 0)",
+            "if [ \"\$TSZ\" = \"0\" ]; then rm -f '$eTmp'; echo EMPTY; exit 0; fi",
+            "mv -f '$eTmp' '$eDst'",
+            "sync",
+            "chown 1023:1023 '$eDst' 2>/dev/null || true",
+            "chmod 0664 '$eDst' 2>/dev/null || true",
+            "echo MOVED"
+        ).exec()
+
+        if (res.out.contains("MOVED")) {
+            ImageStore.syncFuseMetadata(dstPath)
+            return ImageStore.toUserPath(dstPath)
+        }
+        return null
     }
 
     private fun isValidImageExtension(ext: String): Boolean {
@@ -393,7 +573,7 @@ class ImageChooserActivity : AppCompatActivity() {
 
     private fun setupNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Image Creation"
+            val name = "镜像创建"
             val descriptionText = "Progress notifications for image creation"
             val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
@@ -426,20 +606,20 @@ class ImageChooserActivity : AppCompatActivity() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
 
         if (isError) {
-            builder.setContentTitle("Failed to create image: $fileName")
+            builder.setContentTitle("创建镜像失败：$fileName")
                 .setContentText(errorMsg)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setOngoing(false)
                 .setProgress(0, 0, false)
         } else if (isDone) {
-            builder.setContentTitle("Image Created Successfully")
-                .setContentText("$fileName ($totalMb MB) created.")
+            builder.setContentTitle("镜像创建成功")
+                .setContentText("$fileName（$totalMb MB）已创建。")
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setOngoing(false)
                 .setProgress(0, 0, false)
         } else {
-            val contentText = if (writtenMb > 0 || totalMb > 0) "$writtenMb MB / $totalMb MB" else "Creating image..."
-            builder.setContentTitle("Creating Image: $fileName")
+            val contentText = if (writtenMb > 0 || totalMb > 0) "$writtenMb MB / $totalMb MB" else "正在创建镜像…"
+            builder.setContentTitle("正在创建镜像：$fileName")
                 .setContentText(contentText)
                 .setCategory(NotificationCompat.CATEGORY_PROGRESS)
                 .setProgress(100, percent, false)
@@ -519,7 +699,8 @@ class ImageChooserActivity : AppCompatActivity() {
                 R.id.chipFsNone -> "NONE"
                 else -> "FAT32"
             }
-            val useFastAllocation = dialogBinding.switchFastAllocation.isChecked
+            // 稀疏镜像：默认勾选。truncate 秒建，物理占用随主机写入增长。
+            val sparse = dialogBinding.switchFastAllocation.isChecked
 
             // Disable controls during creation
             dialogBinding.etImageName.isEnabled = false
@@ -534,7 +715,7 @@ class ImageChooserActivity : AppCompatActivity() {
             dialogBinding.layoutProgress.visibility = View.VISIBLE
             dialogBinding.progressIndicatorDialog.isIndeterminate = false
             dialogBinding.progressIndicatorDialog.progress = 0
-            dialogBinding.tvProgressStatus.text = "Initializing image creation..."
+            dialogBinding.tvProgressStatus.text = "正在初始化镜像创建…"
 
             val cleanName = if (name.endsWith(".img", ignoreCase = true) || name.endsWith(".iso", ignoreCase = true)) {
                 name
@@ -544,12 +725,18 @@ class ImageChooserActivity : AppCompatActivity() {
 
             showImageCreationNotification(cleanName, 0, 0, sizeMb)
 
+            // 目标目录改为 /data/media/0/PhoneStick（标签 media_rw_data_file）。
+            // 原来的 filesDir 是 app_data_file，SELinux 不允许内核 gadget 线程
+            // 写入，会导致主机端 fdisk 写分区表报 I/O error。
+            ImageStore.ensureDir()
+
             ImageCreator.createBlankImage(
-                targetDirectory = filesDir,
+                targetDirectory = File(ImageStore.RAW_DIR),
                 fileName = name,
                 sizeInMB = sizeMb,
                 filesystemFormat = fsFormat,
-                useFastAllocation = useFastAllocation,
+                sparse = sparse,
+                useFastAllocation = !sparse,
                 onProgressStatus = { status, percent, writtenMb, totalMb ->
                     dialogBinding.progressIndicatorDialog.progress = percent
                     dialogBinding.tvProgressStatus.text = status
@@ -559,13 +746,15 @@ class ImageChooserActivity : AppCompatActivity() {
                     dialog.dismiss()
                     if (success && file != null) {
                         showImageCreationNotification(cleanName, 100, sizeMb, sizeMb, isDone = true)
-                        currentlySelectedPath = file.absolutePath
+                        val userPath = ImageStore.toUserPath(file.absolutePath)
+                        currentlySelectedPath = userPath
                         loadImages()
-                        Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
+                        // 创建完成后直接返回主界面，省去用户再点一次
+                        selectAndReturnFile(userPath)
                     } else {
                         showImageCreationNotification(cleanName, 0, 0, sizeMb, isError = true, errorMsg = msg)
                         MaterialAlertDialogBuilder(this)
-                            .setTitle("Image Creation Error")
+                            .setTitle("创建镜像失败")
                             .setMessage(msg)
                             .setPositiveButton(android.R.string.ok, null)
                             .show()
@@ -580,8 +769,8 @@ class ImageChooserActivity : AppCompatActivity() {
     private fun showMultiFormatDialog() {
         if (imageFiles.isEmpty()) {
             MaterialAlertDialogBuilder(this)
-                .setTitle("No Image Files")
-                .setMessage("There are no image files available to format.")
+                .setTitle("没有镜像文件")
+                .setMessage("没有可格式化的镜像文件。")
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
             return
@@ -614,7 +803,7 @@ class ImageChooserActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.action_confirm_format -> {
                     if (selected.isEmpty()) {
-                        Snackbar.make(binding.root, "Select at least 1 image to format", Snackbar.LENGTH_SHORT).show()
+                        Snackbar.make(binding.root, "请至少选择 1 个要格式化的镜像", Snackbar.LENGTH_SHORT).show()
                     } else {
                         showFormatSelectionDialog(selected)
                     }
@@ -622,7 +811,7 @@ class ImageChooserActivity : AppCompatActivity() {
                 }
                 R.id.action_confirm_delete -> {
                     if (selected.isEmpty()) {
-                        Snackbar.make(binding.root, "Select at least 1 image to delete", Snackbar.LENGTH_SHORT).show()
+                        Snackbar.make(binding.root, "请至少选择 1 个要删除的镜像", Snackbar.LENGTH_SHORT).show()
                     } else {
                         confirmBatchDelete(selected)
                     }
@@ -640,9 +829,9 @@ class ImageChooserActivity : AppCompatActivity() {
     private fun confirmBatchDelete(selectedFiles: List<File>) {
         val count = selectedFiles.size
         MaterialAlertDialogBuilder(this)
-            .setTitle("Delete $count Image(s)")
-            .setMessage("Are you sure you want to delete $count selected image file(s)? This action cannot be undone.")
-            .setPositiveButton("Delete") { _, _ ->
+            .setTitle("删除 $count 个镜像")
+            .setMessage("确定要删除选中的 $count 个镜像文件吗？此操作不可撤销。")
+            .setPositiveButton("删除") { _, _ ->
                 executeBatchDelete(selectedFiles)
             }
             .setNegativeButton(R.string.cancel, null)
@@ -663,16 +852,15 @@ class ImageChooserActivity : AppCompatActivity() {
                     }
                 }
                 removeExternalImagePath(file.absolutePath)
-                if (file.exists()) {
-                    file.delete()
-                }
+                val e = file.absolutePath.replace("'", "'\\''")
+                com.topjohnwu.superuser.Shell.cmd("rm -f '$e'").exec()
             }
 
             withContext(Dispatchers.Main) {
                 setLoading(false)
                 exitFormatSelectionMode()
                 loadImages()
-                Snackbar.make(binding.root, "Deleted ${selectedFiles.size} image file(s)", Snackbar.LENGTH_SHORT).show()
+                Snackbar.make(binding.root, "已删除 ${selectedFiles.size} 个镜像文件", Snackbar.LENGTH_SHORT).show()
             }
         }
     }
@@ -694,11 +882,11 @@ class ImageChooserActivity : AppCompatActivity() {
         var selectedFormatIndex = 0
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Choose Filesystem Format")
+            .setTitle("选择文件系统格式")
             .setSingleChoiceItems(formats, 0) { _, which ->
                 selectedFormatIndex = which
             }
-            .setPositiveButton("Format (${selectedFiles.size} file(s))") { _, _ ->
+            .setPositiveButton("格式化（${selectedFiles.size} 个文件）") { _, _ ->
                 val format = formats[selectedFormatIndex]
                 executeBatchFormatting(selectedFiles, format)
             }
@@ -737,14 +925,14 @@ class ImageChooserActivity : AppCompatActivity() {
 
                 if (errors.isEmpty()) {
                     MaterialAlertDialogBuilder(this@ImageChooserActivity)
-                        .setTitle("Formatting Complete")
-                        .setMessage("Successfully formatted ${selectedFiles.size} file(s) as $format.")
+                        .setTitle("格式化完成")
+                        .setMessage("已成功将 ${selectedFiles.size} 个文件格式化为 $format。")
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
                 } else {
                     MaterialAlertDialogBuilder(this@ImageChooserActivity)
-                        .setTitle("Format CLI Errors")
-                        .setMessage("Completed with errors:\n\n" + errors.joinToString("\n\n"))
+                        .setTitle("格式化命令错误")
+                        .setMessage("已完成，但存在错误：\n\n" + errors.joinToString("\n\n"))
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
                 }

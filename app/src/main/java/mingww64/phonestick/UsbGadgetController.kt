@@ -67,7 +67,7 @@ object UsbGadgetController {
 
     fun mountImage(context: Context, pathOrUri: String, readOnly: Boolean, cdrom: Boolean): Pair<Boolean, String> {
         if (!isRootAvailable()) {
-            return Pair(false, "Root access not available")
+            return Pair(false, "无法获取 Root 权限")
         }
 
         var resolvedPath = pathOrUri
@@ -75,11 +75,33 @@ object UsbGadgetController {
             resolvedPath = UriPathResolver.getRealPathFromUri(context, Uri.parse(pathOrUri))
         }
 
+        // 统一转成 /data/media 原始路径。
+        // gadget 绑定 FUSE 路径（/sdcard、/storage/emulated）会带来额外的
+        // 权限层与性能开销，直接用原始路径更稳。
+        resolvedPath = ImageStore.toRawPath(resolvedPath)
+
         val escapedPath = resolvedPath.replace("'", "'\\''")
-        val existsCmd = Shell.cmd("if [ -f '$escapedPath' ]; then echo EXISTS; fi").exec()
+        val existsCmd = Shell.cmd(
+            "if [ -f '$escapedPath' ]; then echo EXISTS; echo \"SIZE=\$(stat -c %s '$escapedPath' 2>/dev/null)\"; " +
+                "else echo MISSING; fi"
+        ).exec()
         if (!existsCmd.out.contains("EXISTS")) {
-            return Pair(false, "Image file path does not exist: $resolvedPath")
+            return Pair(false, "镜像文件不存在：$resolvedPath")
         }
+        // 空文件绑进 LUN 主机端会看到一个 0 扇区的盘，后续所有操作都会莫名失败，
+        // 不如在这里明确拦住
+        val size = existsCmd.out.lastOrNull { it.startsWith("SIZE=") }
+            ?.removePrefix("SIZE=")?.trim()?.toLongOrNull() ?: 0L
+        if (size <= 0) {
+            return Pair(false, "镜像文件为空：$resolvedPath")
+        }
+
+        // 兜底：确保 kernel 侧的 gadget 线程有权限写这个文件。
+        // 若镜像不在 media_rw_data_file 名下（例如残留在 app_data_file），
+        // 这里会放开权限位，避免主机端写分区表报 I/O error。
+        Shell.cmd(
+            "chmod 0666 '$escapedPath' 2>/dev/null || true"
+        ).exec()
 
         val roFlag = if (readOnly) "y" else "n"
         val cdromFlag = if (cdrom) "y" else "n"
@@ -142,15 +164,19 @@ object UsbGadgetController {
             val writeRes = Shell.cmd(
                 "echo '$roFlag' > '$foundLun/ro' 2>/dev/null || true",
                 "echo '$cdromFlag' > '$foundLun/cdrom' 2>/dev/null || true",
+                // nofua=1 让 gadget 不再对每次写做同步落盘。
+                // 在 f2fs/ext4 上，主机 fdisk 的 SYNCHRONIZE CACHE 会转成
+                // fdatasync，一旦失败主机就收到 I/O error（分区表写不进去）。
+                "echo 1 > '$foundLun/nofua' 2>/dev/null || true",
                 "echo '$escapedPath' > '$foundLun/file'",
                 "CHECK=\$(cat '$foundLun/file' 2>/dev/null)",
                 "if [ -n \"\$CHECK\" ]; then echo 'S1_SUCCESS'; else echo 'S1_FAILED'; fi"
             ).exec()
             if (writeRes.out.contains("S1_SUCCESS")) {
-                return Pair(true, "Successfully mounted via sys.usb.config ($foundLun)")
+                return Pair(true, "挂载成功（sys.usb.config，$foundLun）")
             }
             Log.w(TAG, "Strategy 1: LUN found but write failed: ${writeRes.err}")
-            return Pair(false, "Mount failed: LUN appeared but kernel rejected the image path.\n${writeRes.err.joinToString("\n")}")
+            return Pair(false, "挂载失败：LUN 已出现，但内核拒绝了该镜像路径。\n${writeRes.err.joinToString("\n")}")
         }
 
         Log.w(TAG, "Strategy 1: no LUN appeared after setprop — init does not handle mass_storage on this device, trying ConfigFS gadget")
@@ -158,10 +184,10 @@ object UsbGadgetController {
 
         // --- Strategy 2: Create own 'swy' gadget in ConfigFS ---
         if (configFs.isEmpty()) {
-            return Pair(false, "ConfigFS not found on this device")
+            return Pair(false, "未找到 ConfigFS")
         }
         if (udcName.isEmpty()) {
-            return Pair(false, "USB Device Controller not found (no UDC in /sys/class/udc/ and sys.usb.controller is not set)")
+            return Pair(false, "未找到 USB 设备控制器（/sys/class/udc/ 为空且未设置 sys.usb.controller）")
         }
 
         val configFsScript = arrayOf(
@@ -188,6 +214,7 @@ object UsbGadgetController {
             "echo '$roFlag' > functions/mass_storage.0/lun.0/ro 2>/dev/null || true",
             "echo y > functions/mass_storage.0/lun.0/removable 2>/dev/null || true",
             "echo '$cdromFlag' > functions/mass_storage.0/lun.0/cdrom 2>/dev/null || true",
+            "echo 1 > functions/mass_storage.0/lun.0/nofua 2>/dev/null || true",
             "echo '$escapedPath' > functions/mass_storage.0/lun.0/file",
             // ln -sf so re-mounting after unmount doesn't fail with "File exists"
             "ln -sf functions/mass_storage.0 configs/swyconfig.1/mass_storage.0 2>/dev/null || true",
@@ -201,13 +228,13 @@ object UsbGadgetController {
         Log.d(TAG, "Strategy 2 (swy gadget) out=${result1.out} err=${result1.err}")
         if (result1.isSuccess && result1.out.contains("CONFIGFS_SUCCESS")) {
             saveAndEnableMassStorageConfig(context)
-            return Pair(true, "Successfully mounted via ConfigFS gadget (UDC: $udcName)")
+            return Pair(true, "挂载成功（ConfigFS gadget，UDC：$udcName）")
         }
 
         val errReason = result1.err.joinToString("\n").ifEmpty {
-            result1.out.joinToString("\n").ifEmpty { "Kernel rejected LUN file binding" }
+            result1.out.joinToString("\n").ifEmpty { "内核拒绝绑定 LUN 文件" }
         }
-        return Pair(false, "Failed to mount USB gadget:\n$errReason")
+        return Pair(false, "挂载 USB gadget 失败：\n$errReason")
     }
 
     /**
@@ -272,10 +299,10 @@ object UsbGadgetController {
         }
 
         return if (result.isSuccess) {
-            Pair(true, "Unmounted successfully")
+            Pair(true, "已卸载")
         } else {
-            val errText = result.err.joinToString("\n").ifEmpty { result.out.joinToString("\n").ifEmpty { "Exit code ${result.code}" } }
-            Pair(false, "Unmount failed (exit code ${result.code}): $errText")
+            val errText = result.err.joinToString("\n").ifEmpty { result.out.joinToString("\n").ifEmpty { "退出码 ${result.code}" } }
+            Pair(false, "卸载失败（退出码 ${result.code}）：$errText")
         }
     }
 

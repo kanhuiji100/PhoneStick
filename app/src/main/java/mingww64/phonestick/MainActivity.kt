@@ -24,6 +24,12 @@ class MainActivity : AppCompatActivity() {
     private var selectedImagePath: String = ""
     private var isCurrentlyMounted: Boolean = false
 
+    /** 缓存的大小，来自 root shell 的 stat，避免 UI 线程做 IO */
+    private var selectedSizeBytes: Long = 0L
+
+    /** 缓存的实际占用（稀疏镜像 < 逻辑大小） */
+    private var selectedUsedBytes: Long = 0L
+
     private val selectImageLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -35,6 +41,8 @@ class MainActivity : AppCompatActivity() {
 
             if (path.isNotEmpty()) {
                 selectedImagePath = path
+                selectedSizeBytes = 0L
+                selectedUsedBytes = 0L
                 saveSelectedImagePath(path)
                 refreshStatus()
 
@@ -106,25 +114,46 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus() {
         lifecycleScope.launch(Dispatchers.IO) {
             val status = UsbGadgetController.getMountStatus()
-            
-            // Check if stored image file still exists
-            if (selectedImagePath.isNotEmpty() && !selectedImagePath.startsWith("content://")) {
-                if (!File(selectedImagePath).exists()) {
-                    selectedImagePath = ""
+
+            // 用 root shell 判断文件是否还在。
+            // 不能用 File.exists()：/sdcard 是 FUSE 视图，由 root 创建的镜像
+            // 属主是 root:everybody(9997)、权限 rw-rw----，app uid 读不到，
+            // File.exists() 会误报 false，导致选中项被清空。
+            var path = selectedImagePath
+            var size = selectedSizeBytes
+            var used = 0L
+
+            if (path.isNotEmpty() && !path.startsWith("content://")) {
+                val info = ImageStore.query(path)
+                if (!info.exists) {
+                    path = ""
+                    size = 0L
+                    used = 0L
                     saveSelectedImagePath("")
+                } else {
+                    size = info.size
+                    used = info.usedBytes
+                    // 已挂载但还没选中时，用内核里记录的路径反填
+                    if (path.isEmpty() && status.isMounted) {
+                        path = ImageStore.toUserPath(status.currentFile)
+                        saveSelectedImagePath(path)
+                    }
                 }
+            } else if (path.isEmpty() && status.isMounted && status.currentFile.isNotEmpty()) {
+                path = ImageStore.toUserPath(status.currentFile)
+                saveSelectedImagePath(path)
             }
 
             withContext(Dispatchers.Main) {
+                selectedImagePath = path
+                selectedSizeBytes = size
+                selectedUsedBytes = used
                 isCurrentlyMounted = status.isMounted
 
                 if (status.isMounted) {
                     binding.tvStatusBadge.text = getString(R.string.status_mounted)
                     binding.tvStatusBadge.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_mounted))
                     binding.tvLunInfo.text = getString(R.string.status_lun_path, status.lunPath)
-                    if (selectedImagePath.isEmpty()) {
-                        selectedImagePath = status.currentFile
-                    }
                 } else {
                     binding.tvStatusBadge.text = getString(R.string.status_unmounted)
                     binding.tvStatusBadge.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_unmounted))
@@ -145,18 +174,15 @@ class MainActivity : AppCompatActivity() {
                 if (rawName.contains(':')) {
                     rawName = rawName.substringAfterLast(':')
                 }
-                binding.tvSelectedFileName.text = if (rawName.isNotBlank()) rawName else "Imported Document"
+                binding.tvSelectedFileName.text = if (rawName.isNotBlank()) rawName else "导入的文档"
                 binding.tvSelectedPath.text = decoded
             } else {
                 val file = File(selectedImagePath)
-                if (file.exists()) {
-                    binding.tvSelectedFileName.text = file.name
-                    val sizeStr = formatFileSize(file.length())
-                    binding.tvSelectedPath.text = "$sizeStr • ${file.parent ?: ""}"
-                } else {
-                    binding.tvSelectedFileName.text = getString(R.string.file_picker_nofile)
-                    binding.tvSelectedPath.text = ""
-                }
+                binding.tvSelectedFileName.text = file.name
+                // 大小已经在 IO 线程查好并缓存，UI 线程不再做 shell 查询
+                val sizeStr = ImageStore.formatSizeWithUsage(selectedSizeBytes, selectedUsedBytes)
+                val dir = ImageStore.toUserPath(file.parent ?: "")
+                binding.tvSelectedPath.text = "$sizeStr • $dir"
             }
         } else {
             binding.tvSelectedFileName.text = getString(R.string.file_picker_nofile)
@@ -197,7 +223,7 @@ class MainActivity : AppCompatActivity() {
                     Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
                 } else {
                     MaterialAlertDialogBuilder(this@MainActivity)
-                        .setTitle("Mount Error")
+                        .setTitle("挂载失败")
                         .setMessage(message)
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
@@ -218,7 +244,7 @@ class MainActivity : AppCompatActivity() {
                     Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
                 } else {
                     MaterialAlertDialogBuilder(this@MainActivity)
-                        .setTitle("Unmount Error")
+                        .setTitle("卸载失败")
                         .setMessage(message)
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
@@ -246,18 +272,5 @@ class MainActivity : AppCompatActivity() {
             .edit()
             .putString("last_image_path", path)
             .apply()
-    }
-
-    private fun formatFileSize(sizeBytes: Long): String {
-        if (sizeBytes <= 0) return "0 B"
-        val kb = sizeBytes / 1024.0
-        val mb = kb / 1024.0
-        val gb = mb / 1024.0
-        return when {
-            gb >= 1.0 -> String.format("%.2f GB", gb)
-            mb >= 1.0 -> String.format("%.2f MB", mb)
-            kb >= 1.0 -> String.format("%.2f KB", kb)
-            else -> "$sizeBytes B"
-        }
     }
 }

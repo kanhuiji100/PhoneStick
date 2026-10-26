@@ -161,10 +161,14 @@ object UriPathResolver {
                 fileName = "imported_$fileName.img"
             }
 
-            val targetFile = File(context.filesDir, fileName)
-            val tempFile = File(context.filesDir, "$fileName.tmp")
+            // 关键：落点必须是 media_rw_data_file 区域，不能是 app 的 filesDir。
+            // filesDir 属于 app_data_file，内核 gadget 线程写不进去，
+            // 会导致主机端 fdisk 写分区表报 I/O error。
+            val targetDir = File(ImageStore.RAW_DIR)
+            val targetFile = File(targetDir, fileName)
+            val tempFile = File(targetDir, "$fileName.tmp")
 
-            Log.i(TAG, "Copying SAF URI to internal storage: ${targetFile.absolutePath}")
+            Log.i(TAG, "Copying SAF URI to shared storage: ${targetFile.absolutePath}")
 
             // Write to a temp file first so we never leave a 0-byte stub if the copy fails
             tempFile.delete() // clean up any previous failed attempt
@@ -178,12 +182,14 @@ object UriPathResolver {
                 // Atomic rename: replace target with the fully-written temp file
                 if (targetFile.exists()) targetFile.delete()
                 if (tempFile.renameTo(targetFile)) {
+                    ImageStore.makeReadable(targetFile.absolutePath)
                     return targetFile.absolutePath
                 }
                 // renameTo failed (e.g. cross-device) — fall back to copy + delete
                 tempFile.copyTo(targetFile, overwrite = true)
                 tempFile.delete()
                 if (targetFile.exists() && targetFile.length() > 0) {
+                    ImageStore.makeReadable(targetFile.absolutePath)
                     return targetFile.absolutePath
                 }
             } else {
@@ -194,7 +200,7 @@ object UriPathResolver {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to copy SAF URI: ${e.message}", e)
             // Clean up any partial temp file
-            File(context.filesDir, "${Uri.decode(uri.toString()).substringAfterLast('/')}.tmp").delete()
+            File(ImageStore.RAW_DIR, "${Uri.decode(uri.toString()).substringAfterLast('/')}.tmp").delete()
         }
         return uri.toString()
     }

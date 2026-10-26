@@ -32,7 +32,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Select Size Preset:"
+        android:text="选择预设容量："
         android:textAppearance="?attr/textAppearanceBodyMedium"
         android:layout_marginBottom="8dp" />
 
@@ -109,7 +109,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Filesystem Format:"
+        android:text="文件系统格式："
         android:textAppearance="?attr/textAppearanceBodyMedium"
         android:layout_marginBottom="8dp" />
 
@@ -154,7 +154,7 @@
                 style="@style/Widget.Material3.Chip.Filter"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Raw Blank (No FS)" />
+                android:text="裸盘（无文件系统）" />
 
         </com.google.android.material.chip.ChipGroup>
 
@@ -164,9 +164,17 @@
         android:id="@+id/switchFastAllocation"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="4dp"
         android:checked="true"
-        android:text="Fast Allocation (fallocate)" />
+        android:text="稀疏镜像（按需占用空间）" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="瞬间创建。文件只占用实际写入的数据，电脑端仍显示完整容量。取消勾选则预先占满整个容量。"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:alpha="0.7" />
 
     <!-- Live Progress Section for Image Creation -->
     <LinearLayout
@@ -189,7 +197,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:gravity="center"
-            android:text="Creating image..."
+            android:text="正在创建镜像…"
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?attr/colorOnSurfaceVariant" />
 

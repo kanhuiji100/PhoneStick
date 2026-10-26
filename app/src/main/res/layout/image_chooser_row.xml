@@ -36,7 +36,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:layout_marginEnd="12dp"
-            android:contentDescription="File icon"
+            android:contentDescription="文件图标"
             android:src="@drawable/ic_sd_storage_vector"
             app:tint="?attr/colorPrimary" />
 
@@ -70,7 +70,7 @@
                     android:layout_marginStart="8dp"
                     android:paddingHorizontal="8dp"
                     android:paddingVertical="2dp"
-                    android:text="ACTIVE"
+                    android:text="使用中"
                     android:textAppearance="?attr/textAppearanceLabelSmall"
                     android:textColor="?attr/colorOnPrimary"
                     android:background="@drawable/bg_active_chip"
@@ -96,7 +96,7 @@
             android:layout_height="40dp"
             android:layout_marginStart="4dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="More options"
+            android:contentDescription="更多操作"
             android:src="@drawable/ic_more_vert_vector"
             app:tint="?attr/colorOnSurfaceVariant" />
 

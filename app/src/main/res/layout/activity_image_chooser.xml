@@ -72,7 +72,7 @@
                 android:background="@drawable/bg_fab_label"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="6dp"
-                android:text="Create Blank Image"
+                android:text="创建空白镜像"
                 android:textAppearance="?attr/textAppearanceLabelMedium"
                 android:textColor="?attr/colorOnPrimary" />
 
@@ -80,7 +80,7 @@
                 android:id="@+id/fabCreateImage"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="Create blank image"
+                android:contentDescription="创建空白镜像"
                 app:fabSize="mini"
                 app:shapeAppearanceOverlay="@style/ShapeAppearance.PhoneStick.CircleFab"
                 app:srcCompat="@drawable/ic_add_vector" />
@@ -105,7 +105,7 @@
                 android:background="@drawable/bg_fab_label"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="6dp"
-                android:text="Import Image"
+                android:text="导入镜像"
                 android:textAppearance="?attr/textAppearanceLabelMedium"
                 android:textColor="?attr/colorOnPrimary" />
 
@@ -113,7 +113,7 @@
                 android:id="@+id/fabImportImage"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="Import existing image"
+                android:contentDescription="导入已有镜像"
                 app:fabSize="mini"
                 app:shapeAppearanceOverlay="@style/ShapeAppearance.PhoneStick.CircleFab"
                 app:srcCompat="@drawable/ic_folder_open_vector" />
@@ -138,7 +138,7 @@
                 android:background="@drawable/bg_fab_label"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="6dp"
-                android:text="Format Image(s)"
+                android:text="格式化镜像"
                 android:textAppearance="?attr/textAppearanceLabelMedium"
                 android:textColor="?attr/colorOnPrimary" />
 
@@ -146,7 +146,7 @@
                 android:id="@+id/fabFormatImage"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="Format image files"
+                android:contentDescription="格式化镜像文件"
                 app:fabSize="mini"
                 app:shapeAppearanceOverlay="@style/ShapeAppearance.PhoneStick.CircleFab"
                 app:srcCompat="@drawable/ic_sd_storage_vector" />
@@ -158,7 +158,7 @@
             android:id="@+id/fabMain"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:contentDescription="Add image actions"
+            android:contentDescription="添加镜像操作"
             app:shapeAppearanceOverlay="@style/ShapeAppearance.PhoneStick.CircleFab"
             app:srcCompat="@drawable/ic_add_vector" />
 
