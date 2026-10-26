@@ -7,3 +7,6 @@
 /build
 /captures
 .externalNativeBuild
+
+# 构建产物：tools/ 下的 pstrim 副本（正式二进制在 app/src/main/assets/pstrim）
+/tools/pstrim
