@@ -1,24 +1,24 @@
-# PhoneStick 开发交接（更新至 2.3.7）
+# PhoneStick 开发交接（更新至 2.4.1）
 
 > 设备：Redmi K20 Pro (raphael)，Android 17 / SDK 37，kernel 4.14.357，Magisk 31.1
-> 工程：`PhoneStick/` 2.3.7（versionCode 19）
-> 交付：`交付/PhoneStick-2.3.7-cn.apk` + `交付/源码改动-2.3.7.patch`
-> 配套：`README.md`（仓库根总览）、`design.md`（方案与 bug 复盘）、
-> `troubleshooting.md`（早期根因）、`windows.md`（Windows 环境）
+> 工程：`PhoneStick/` 2.4.1（versionCode 23）
+> 交付：`交付/PhoneStick-2.4.1-cn.apk` + `交付/源码改动-2.4.1.patch`
+> 配套：`README.md`（总览）、`动态镜像研究.md`（方案与 bug 复盘）、
+> `排查报告.md`（早期根因）、`Windows迁移调试指南.md`（Windows 环境）
 
 ---
 
-## 零、当前状态（2.3.7）
+## 零、当前状态（2.4.1）
 
 | 项目 | 状态 |
 |---|---|
 | 挂载 / 卸载 U 盘 | ✅ 真机验证 |
 | 稀疏镜像创建（含裸盘） | ✅ 4GB 约 2 秒，8GB 实测 126MB 占用 |
 | 容量 / 实际占用显示 | ✅ `8.00 GB · 已用 264 MB` / `2.00 GB · 未写入` |
-| 释放未使用空间 | ✅ FAT32 / exFAT / NTFS / ext4，覆盖 MBR / GPT / 无分区表 |
+| 释放未使用空间 | ✅ FAT32 / exFAT / NTFS / ext4，MBR / GPT / 无分区表，**多分区逐个处理** |
 | 中文界面 | ✅ 布局 + 对话框 + 菜单 + 通知 |
 | 默认读写挂载 | ✅ `switchReadOnly` 默认关闭 |
-| 遗留 | 仅 arm64；回收只处理第一个分区；ext4 `BLOCK_UNINIT` 组跳过 |
+| 遗留 | 仅 arm64；扩展/逻辑分区不展开；ext4 `BLOCK_UNINIT` 组跳过 |
 
 ### 版本历史
 
@@ -31,6 +31,8 @@
 | 2.3.5 | 修复裸盘镜像不被识别为稀疏（`used > 0` 判定错误） |
 | 2.3.6 | 回收支持 exFAT / NTFS / ext4（初版，布局识别不全） |
 | 2.3.7 | 回收补全 GPT / 无分区表支持，修正 ext4 位图寻址 |
+| 2.4.0 | 多分区镜像逐个回收（GPT 全条目 / MBR 4 主分区）+ 尾部零块回收；回收入口对所有镜像开放 |
+| 2.4.1 | ext4 `BLOCK_UNINIT` 组参与回收 + 零块扫描（inode 表/保留 GDT 可压缩）；新增 --stats/--map 诊断 |
 
 > 以下「一 ～ 十二」按时间顺序保留了每一轮的排查过程与实测数据，
 > 结论仍然有效，但**当前状态以本节为准**。
@@ -52,7 +54,7 @@
 盘符立刻出现，adb 不受影响。
 
 完整证据、修复命令、以及"为什么 App 侧绕不开"见
-**`troubleshooting.md` 第十五节**；操作版见 **`windows.md` 5.5 节**。
+**`排查报告.md` 第十五节**；操作版见 **`Windows迁移调试指南.md` 5.5 节**。
 
 ---
 
@@ -99,7 +101,7 @@
 （工作区里原本就有那批 2.3.1 改动：`ImageStore.kt` 未跟踪、`.gitattributes` 未跟踪，
 以及若干 M 文件，其中 `usbmountr.txt` / `gradlew` 的差异属打包与行尾产物，属正常）。
 
-### 新发现（都已写进 `troubleshooting.md` 第十五节）
+### 新发现（都已写进 `排查报告.md` 第十五节）
 
 | # | 发现 | 影响 |
 |---|---|---|
@@ -183,9 +185,9 @@ Get-Disk | Where-Object BusType -eq 'USB'
 | `tools/fix-windows-usb-driver.ps1` | **新增**：备份 + 移除抢占 MS 接口的 OEM ADB 驱动包；`-Restore` 还原 |
 | `tools/driver-backup/` | **新增**：上述脚本导出的驱动包备份（未打进压缩包） |
 | `tools/cleanup-device.sh` | 扩充清理名单（probe*、runfix.sh、pscheck 等），支持目录与 configfs 探针目录，备份文件显式保留 |
-| `windows.md` | 新增 5.5 节；判读表 / 故障对照表 / 工具清单 / P1 更新；6.5 增加 `su -c` 分号坑 |
-| `troubleshooting.md` | 新增第十五节（根因、证据、修复、三条绕不开的路）；第十三节加 P7 |
-| `handoff.md` | **新增**：本文件 |
+| `Windows迁移调试指南.md` | 新增 5.5 节；判读表 / 故障对照表 / 工具清单 / P1 更新；6.5 增加 `su -c` 分号坑 |
+| `排查报告.md` | 新增第十五节（根因、证据、修复、三条绕不开的路）；第十三节加 P7 |
+| `进度与交接.md` | **新增**：本文件 |
 | `PhoneStick/` | 未改动 |
 | `交付/` | 未改动 |
 
@@ -236,7 +238,7 @@ Get-Disk | Where-Object BusType -eq 'USB'
 
 - `交付/PhoneStick-2.3.2-sparse.apk`（已装机验证，vc14）
 - `交付/源码改动-2.3.2.patch`（含 2.3.1 以来的全部改动，12 个文件）
-- `design.md` 第八节：实现细节与验证数据；附录含 qcow2/VDI 不可行的完整论证
+- `动态镜像研究.md` 第八节：实现细节与验证数据；附录含 qcow2/VDI 不可行的完整论证
 
 ### 注意
 
@@ -283,7 +285,7 @@ App 挂载出来的盘默认可写（LUN `ro=0`）。其他语言/逻辑不变�
 
 - `交付/PhoneStick-2.3.3-cn.apk`（vc15，已装机）
 - `交付/源码改动-2.3.3.patch`（18 个文件，含 2.3.1 以来全部改动）
-- `design.md` 第九节：回收方案与被否掉的替代实现
+- `动态镜像研究.md` 第九节：回收方案与被否掉的替代实现
 
 > 注意：patch 不含 `assets/pstrim`（二进制）。重新编译命令：
 > `aarch64-linux-gnu-gcc -static -O2 -o pstrim pstrim.c`（源在 `tools/pstrim.c`），
@@ -343,3 +345,46 @@ md5 一致；真机 ext4 镜像 382.57MB → 82.50MB，e2fsck 干净；
 现有 fat/exfat/ntfs/ext4 四个真实镜像 dry-run 全部正确识别。
 
 产物：`交付/PhoneStick-2.3.7-cn.apk`（vc19）、`交付/源码改动-2.3.7.patch`。
+
+---
+
+## 十三、2.4.0：多分区镜像回收
+
+之前 `pstrim` 只取第一个分区。像 `aoscrootfs.img`（GPT：300MB FAT32 + 63.7GB ext4）
+这种镜像，ext4 那半边永远不会被处理。
+
+改动：
+- `locate_partitions()` 收集所有分区（GPT 全条目 / MBR 4 个主分区 / 无表则超级软盘）；
+- 每个分区独立识别 FS 并回收，输出 `fs=fat32,ext4 parts=2 trimmed=2`；
+- 补上"最后一个分区之后"的尾部零块回收（400MB 镜像里常有 100MB 尾部空占）；
+- 零块扫描合并连续段（runs 64022 → 27）；
+- 回收入口改为对**所有镜像**显示（非稀疏镜像最需要它：能把 400MB 压回 119MB）。
+
+验证：
+- 主机：GPT 双分区 400MB → 119MB、MBR 双分区 331MB → 123MB，两边保留文件 md5 一致、fsck 干净；
+- 真机（Xiaomi 15）：同样的 400MB 双分区镜像经 App 回收 **410MB → 119MB**，
+  拉回主机后两个分区 md5 一致、`fsck.vfat` / `e2fsck -fn` 干净；
+- `aoscrootfs.img` dry-run 显示两个分区都识别（fat32,ext4），但它只有 184MB 物理占用，
+  大部分空闲区本来就是洞，实际可释放空间很小。
+
+产物：`交付/PhoneStick-2.4.0-cn.apk`（vc22）、`交付/源码改动-2.4.0.patch`；
+`pstrim.c` 已从仓库外的 `tools/` 移到 `PhoneStick/native/`，随代码一起纳入版本管理。
+
+---
+
+## 十四、2.4.1：修复「删了 499MB 却回收不出来」
+
+两个根因：
+1. ext4 的 `BLOCK_UNINIT` 块组被整组跳过——格式化后整组空闲，但旧数据块仍实占镜像；
+2. inode 表 / 保留 GDT 属于"已分配但全零"的块，按空闲块回收永远碰不到，
+   而它们正是 706MB 里的大头。
+
+修复：
+- ext4 回收改两遍（先收集元数据保护区，再逐组回收，uninit 组按"除元数据外空闲"处理）；
+- 新增零块扫描（SEEK_DATA/SEEK_HOLE 遍历已分配区间，全零 4K 块打洞）；
+- 新增 `--stats` / `--map` 诊断开关。
+
+实测：`aoscrootfs.img` **706MB → 5.9MB**（挂载测试后 23MB），两分区可正常挂载读写；
+主机回归 ext4 正常/格式化残留、FAT32 全部通过（md5 + fsck + 写入测试）。
+
+产物：`交付/PhoneStick-2.4.1-cn.apk`（vc23）、`交付/源码改动-2.4.1.patch`。

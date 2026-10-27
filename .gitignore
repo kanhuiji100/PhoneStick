@@ -10,3 +10,6 @@
 
 # 构建产物：tools/ 下的 pstrim 副本（正式二进制在 app/src/main/assets/pstrim）
 /tools/pstrim
+
+# native 目录只提交源码，编译产物由 CI/本地生成
+/native/pstrim

@@ -112,12 +112,12 @@ class ImageFilesAdapter(
         val popup = PopupMenu(context, anchorView)
         popup.menu.add("立即挂载")
 
-        // 只有稀疏镜像（实际占用小于逻辑容量，含 0 占用的裸盘）才提供空间回收
-        val size = sizeProvider(file.absolutePath)
-        val used = usedProvider(file.absolutePath)
-        if (ImageStore.isSparse(size, used)) {
-            popup.menu.add(context.getString(R.string.image_reclaim_space))
-        }
+        // 所有镜像都提供空间回收入口：
+        //   - 稀疏镜像：回收已删除文件留下的块
+        //   - 非稀疏镜像（预分配，或被 PC/其他工具写满）：把文件系统里的空闲块打洞，
+        //     等价于"压缩"，400MB 的镜像常常能压回几十 MB
+        // 不可识别的文件系统会在执行时给出明确提示，不需要在这里预先判断。
+        popup.menu.add(context.getString(R.string.image_reclaim_space))
 
         popup.menu.add("重命名")
         popup.menu.add("删除")

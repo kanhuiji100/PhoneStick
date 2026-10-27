@@ -1,8 +1,8 @@
 # PhoneStick 2.3.1 Windows 迁移调试指南
 
 > **文档状态**：面向 2.3.1 的 Windows 环境搭建与验证流程，操作步骤仍然适用；
-> 项目当前版本是 **2.3.7**，新增能力（稀疏镜像、空间回收、中文界面）见 `README.md`（仓库根）。
-> 配套文档：`troubleshooting.md`（问题根因与已完成的修复）、`handoff.md`（当前状态 / 本机改动 / 遗留待办）
+> 项目当前版本是 **2.3.7**，新增能力（稀疏镜像、空间回收、中文界面）见 `README.md`。
+> 配套文档：`排查报告.md`（问题根因与已完成的修复）、`进度与交接.md`（当前状态 / 本机改动 / 遗留待办）
 > 目标：把工程搬到 Windows 上继续排查剩余问题
 
 - 设备：Redmi K20 Pro (raphael)，Android 17 / SDK 37，kernel 4.14.357，Magisk 31.1
@@ -12,10 +12,6 @@
 ---
 
 ## 一、包内结构
-
-> 历史快照：以下是 2.3.1 阶段送 Windows 调试时的压缩包结构，文档当时用中文文件名，
-> 现已归档到本仓库 `docs/` 下的英文名（`windows.md` / `troubleshooting.md` /
-> `handoff.md` / `design.md`），`交付/` 里的 APK 改由 GitHub Releases 分发。
 
 ```
 PhoneStick-2.3.1-dev/
@@ -56,10 +52,6 @@ PhoneStick-2.3.1-dev/
 对构建更友好）。**不要对它执行 `git checkout`**——Windows 默认
 `core.symlinks=false`，checkout 会把这个文件写成一串路径文本
 `../../../../../LICENSE`，反而把授权页内容弄坏。
-
-> 本仓库（GitHub 上的 fork）已在 Linux 侧把 `usbmountr.txt` 恢复成符号链接，
-> 所以 `git status` **不再**出现这条 ` T`；只有再从 Windows 打 zip 转手时才会重现。
-> 构建时 Gradle 会跟随链接读取内容，与实体文件效果相同。
 
 另外这个仓库是**浅克隆**（`.git/shallow` 存在，只有 1 个提交，
 HEAD = 上游 `v2.3.1-beta`）。`git log` 看不到历史、`git pull` 需要先
@@ -267,7 +259,7 @@ adb shell su -c "setprop sys.usb.config adb"
 `system:usb`、mode `drwxrwx---`，Magisk 域不在 `usb` 组，`mkdir` 返回 `EPERM`，
 而且这条拒绝被 `dontaudit` 吞掉，dmesg 里连记录都没有——看起来像"莫名其妙失败"。
 `setprop` 走的是系统 usb init，它由 `system` 身份重建整份 gadget，才建得出链接。
-详见 `troubleshooting.md` 第十节。
+详见 `排查报告.md` 第十节。
 
 ### 5.4 端到端验收（确认真的可读可写）
 
@@ -323,7 +315,7 @@ Windows 的匹配顺序是“硬件 ID 优先于接口类”，所以收件箱�
 
 **为什么不能靠 App 绕开**：这台机器上 `sys.usb.config mass_storage`（单 MS）
 被 gadget HAL 忽略、`idProduct` 写入被 SELinux 拒绝、App 自带的 `swy` gadget
-在 Android 17 上 `ln -s` 报 `Operation not permitted`。详见 `troubleshooting.md` 第十五节。
+在 Android 17 上 `ln -s` 报 `Operation not permitted`。详见 `排查报告.md` 第十五节。
 
 ---
 

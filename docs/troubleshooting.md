@@ -2,8 +2,8 @@
 
 > **文档状态**：这是 2.3.0 阶段（versionCode 12）的根因排查记录。
 > 其中的结论（SELinux 写权限、MBR 扇区数、Windows 驱动抢占）至今有效，
-> 但项目已迭代到 **2.3.7**，现状请以 `README.md`（仓库根） 与 `handoff.md` 为准。
-> 后续新增内容见 `design.md`（稀疏镜像 / 空间回收 / 相关 bug 复盘）。
+> 但项目已迭代到 **2.3.7**，现状请以 `README.md` 与 `进度与交接.md` 为准。
+> 后续新增内容见 `动态镜像研究.md`（稀疏镜像 / 空间回收 / 相关 bug 复盘）。
 
 - 设备：Redmi K20 Pro (raphael)，Android 17 (SDK 37)，kernel 4.14.357
 - Root：Magisk 31.1
@@ -521,14 +521,14 @@ P2 是最值得先修的：App 被外部改过 `sys.usb.config` 之后，
 `lun.0/file` 里的路径还在，但配置链接已经消失，
 于是界面永远显示"Mounted"，用户怎么点都没反应。
 
-详细复现步骤与排查切入点见 **`windows.md` 第七节**。
+详细复现步骤与排查切入点见 **`Windows迁移调试指南.md` 第七节**。
 
 ## 十四、交付物与工具
 
 | 文件 | 用途 |
 |---|---|
-| `windows.md` | Windows 环境搭建、构建、验证、剩余 bug 清单 |
-| `handoff.md` | 当前进度、本机（Windows）改动、遗留待办、回 Linux 后的继续步骤 |
+| `Windows迁移调试指南.md` | Windows 环境搭建、构建、验证、剩余 bug 清单 |
+| `进度与交接.md` | 当前进度、本机（Windows）改动、遗留待办、回 Linux 后的继续步骤 |
 | `交付/PhoneStick-2.3.1-fixed.apk` | 已编译好的修复版，可直接安装 |
 | `交付/源码改动.patch` | `git apply` 可复现全部改动 |
 | `tools/device-doctor.sh` | 设备一键体检：root、配置链接、LUN、镜像标签、内核错误、内存、工具链 |

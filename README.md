@@ -13,17 +13,20 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 ---
 
 > **本仓库是 [`mingww64/PhoneStick`](https://github.com/mingww64/PhoneStick) 的个人分支（fork）。**
-> 上游基线为 `v2.3.1-beta`（2.3.0 系列），本分支在其之上修复了镜像位置、分区表、
-> 稀疏占用等一系列问题，并做了中文化、空间回收等增强，当前版本 **2.3.7**（versionCode 19）。
+> 上游基线为 `v2.3.1-beta`（2.3.0 系列），本分支在其之上修复了镜像位置、分区表、稀疏占用等问题，
+> 并做了中文化、空间回收等增强，当前版本 **2.4.1**（versionCode 23）。
 >
+> 主要增强：
+> - **稀疏镜像**：`truncate` 秒建，物理占用随写入增长（4GB 约 2 秒，8GB 实测 126MB）
+> - **中文界面**：布局、对话框、菜单、通知全中文
+> - **释放未使用空间**：支持 FAT32 / exFAT / NTFS / ext4，MBR / GPT / 无分区表，多分区逐个处理，
+>   并带零块压缩（inode 表等零填充元数据也能压掉）
+> - 修复：MediaStore 记录滞后导致文件管理器显示旧大小；裸盘镜像不被识别为稀疏
 > - 安装包在 [Releases](https://github.com/kanhuiji100/PhoneStick/releases) 下载（仓库内不存 APK）
 > - 与原版签名不同，覆盖安装前需先 `adb uninstall mingww64.phonestick`
-> - 所有改动集中在 `docs/` 里留档，便于差异追溯与回归
+>
 
-## 本分支相对上游的改动
-
-| 版本 | 主要改动 |
-|---|---|
+---|---|
 | 2.3.1 | 镜像移到 `/data/media/0`（SELinux 可写）；MBR 分区数动态计算；格式化失败上报；定位 Windows 驱动抢占 MS 接口 |
 | 2.3.2 | **稀疏镜像**（`truncate`）：8GB 镜像创建约 2 秒、占用 126MB，解决 >2GB OOM；列表显示实际占用 |
 | 2.3.3 | **中文界面**；挂载默认读写；新增**释放未使用空间**（FAT32，`fallocate(PUNCH_HOLE)` 打洞） |
